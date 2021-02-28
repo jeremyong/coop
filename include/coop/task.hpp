@@ -4,18 +4,18 @@
 #include "scheduler.hpp"
 #include "source_location.hpp"
 #ifdef __clang__
-#include <experimental/coroutine>
+#    include <experimental/coroutine>
 namespace std
 {
-    using experimental::suspend_never;
-    using experimental::noop_coroutine;
-}
+using experimental::noop_coroutine;
+using experimental::suspend_never;
+} // namespace std
 #else
-#include <coroutine>
+#    include <coroutine>
 #endif
+#include <condition_variable>
 #include <cstdlib>
 #include <limits>
-#include <condition_variable>
 #include <mutex>
 #include <unordered_map>
 
@@ -95,6 +95,13 @@ struct task_awaiter_t
     }
 };
 
+struct join_data_t
+{
+    std::condition_variable cvar;
+    std::mutex mutex;
+    bool ready = false;
+};
+
 template <bool Joinable>
 class task_base_t
 {
@@ -113,16 +120,9 @@ public:
     }
 
 protected:
-    struct join_data_t
-    {
-        std::condition_variable cvar;
-        std::mutex mutex;
-        bool ready = false;
-    };
-
     struct promise_type : public promise_base_t
     {
-        join_data_t* join_data;
+        join_data_t* join_data = nullptr;
     };
 
     void join_init()
@@ -193,37 +193,51 @@ public:
     task_t(std::coroutine_handle<promise_type> coroutine) noexcept
         : coroutine_{coroutine}
     {
-        COOP_LOG("Creating task at address %p\n", this);
     }
     task_t(task_t const&) = delete;
     task_t& operator=(task_t const&) = delete;
     task_t(task_t&& other) noexcept
     {
-        COOP_LOG("Moving task %p to address %p\n", &other, this);
         if (coroutine_)
         {
             coroutine_.destroy();
         }
-        coroutine_ = other.coroutine_;
+        coroutine_       = other.coroutine_;
         other.coroutine_ = nullptr;
+
+#ifdef _MSC_VER
+        // On recent MSVC versions, the move constructor of the base template
+        // member field isn't invoked (??)
+        if constexpr (Joinable)
+        {
+            this->join_data_ = std::move(other.join_data_);
+        }
+#endif
     }
     task_t& operator=(task_t&& other) noexcept
     {
         if (this != &other)
         {
-            COOP_LOG("Moving assigning task %p to address %p\n", &other, this);
             if (coroutine_)
             {
                 coroutine_.destroy();
             }
             coroutine_       = other.coroutine_;
             other.coroutine_ = nullptr;
+
+#ifdef _MSC_VER
+            // On recent MSVC versions, the move constructor of the base
+            // template member field isn't invoked (??)
+            if constexpr (Joinable)
+            {
+                this->join_data_ = std::move(other.join_data_);
+            }
+#endif
         }
         return *this;
     }
     ~task_t() noexcept
     {
-        COOP_LOG("Destroying task at address %p\n", this);
         if (coroutine_)
         {
             coroutine_.destroy();
@@ -326,37 +340,51 @@ public:
     task_t(std::coroutine_handle<promise_type> coroutine) noexcept
         : coroutine_{coroutine}
     {
-        COOP_LOG("Creating task at address %p\n", this);
     }
     task_t(task_t const&) = delete;
     task_t& operator=(task_t const&) = delete;
     task_t(task_t&& other) noexcept
     {
-        COOP_LOG("Moving task %p to address %p\n", &other, this);
         if (coroutine_)
         {
             coroutine_.destroy();
         }
-        coroutine_ = other.coroutine_;
+        coroutine_       = other.coroutine_;
         other.coroutine_ = nullptr;
+
+#ifdef _MSC_VER
+        // On recent MSVC versions, the move constructor of the base
+        // template member field isn't invoked (??)
+        if constexpr (Joinable)
+        {
+            this->join_data_ = std::move(other.join_data_);
+        }
+#endif
     }
     task_t& operator=(task_t&& other) noexcept
     {
         if (this != &other)
         {
-            COOP_LOG("Moving assigning task %p to address %p\n", &other, this);
             if (coroutine_)
             {
                 coroutine_.destroy();
             }
             coroutine_       = other.coroutine_;
             other.coroutine_ = nullptr;
+
+#ifdef _MSC_VER
+            // On recent MSVC versions, the move constructor of the base
+            // template member field isn't invoked (??)
+            if constexpr (Joinable)
+            {
+                this->join_data_ = std::move(other.join_data_);
+            }
+#endif
         }
         return *this;
     }
     ~task_t() noexcept
     {
-        COOP_LOG("Destroying task at address %p\n", this);
         if (coroutine_)
         {
             coroutine_.destroy();
