@@ -1,11 +1,14 @@
 #include <coop/detail/work_queue.hpp>
 
+#include <cstdio>
 #include <coop/detail/tracer.hpp>
+#include <cassert>
 
 #ifdef _WIN32
 #    define WIN32_LEAN_AND_MEAN
 #    include <Windows.h>
 #elif defined(__linux__)
+#    include <pthread.h>
 #elif (__APPLE__)
 #endif
 
@@ -16,22 +19,34 @@ work_queue_t::work_queue_t(scheduler_t& scheduler, uint32_t id)
     : scheduler_{scheduler}
     , id_{id}
 {
-    sprintf_s(label_, sizeof(label_), "work_queue:%i", id);
-    event_.init(false, label_);
+    snprintf(label_, sizeof(label_), "work_queue:%i", id);
     active_ = true;
     thread_ = std::thread([this] {
 #if defined(_WIN32)
         SetThreadAffinityMask(
             thread_.native_handle(), static_cast<uint32_t>(1ull << id_));
 #elif defined(__linux__)
-    // TODO: Android/Linux implementation
+        // TODO: Android implementation
+        pthread_t thread = pthread_self();
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(id_, &cpuset);
+        int result = pthread_setaffinity_np(thread, sizeof(cpuset), &cpuset);
+
+        if (result != 0)
+        {
+            errno = result;
+            perror("Failed to set thread affinity");
+            return;
+        }
 #elif (__APPLE__)
     // TODO: MacOS/iOS implementation
 #endif
 
         while (true)
         {
-            event_.wait();
+            std::unique_lock lock{mutex_};
+            cvar_.wait(lock);
 
             for (int i = COOP_PRIORITY_COUNT - 1; i >= 0; --i)
             {
@@ -58,7 +73,7 @@ work_queue_t::work_queue_t(scheduler_t& scheduler, uint32_t id)
 work_queue_t::~work_queue_t() noexcept
 {
     active_ = false;
-    event_.signal();
+    cvar_.notify_one();
     thread_.join();
 }
 
@@ -71,5 +86,5 @@ void work_queue_t::enqueue(std::coroutine_handle<> coroutine,
              source_location.file,
              source_location.line);
     queues_[priority].enqueue(coroutine);
-    event_.signal();
+    cvar_.notify_one();
 }

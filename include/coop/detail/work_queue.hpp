@@ -2,9 +2,18 @@
 
 #include "concurrentqueue.h"
 #include <atomic>
-#include <coop/event.hpp>
+#include <condition_variable>
+#include <mutex>
 #include <coop/source_location.hpp>
+#ifdef __clang__
+#include <experimental/coroutine>
+namespace std
+{
+    using experimental::coroutine_handle;
+}
+#else
 #include <coroutine>
+#endif
 #include <thread>
 
 // Currently, COOP supports exactly two priority levels, 0 (default) and 1
@@ -47,7 +56,8 @@ namespace detail
         uint32_t id_;
         std::thread thread_;
         std::atomic<bool> active_;
-        event_t event_;
+        std::condition_variable cvar_;
+        std::mutex mutex_;
 
         moodycamel::ConcurrentQueue<std::coroutine_handle<>>
             queues_[COOP_PRIORITY_COUNT];

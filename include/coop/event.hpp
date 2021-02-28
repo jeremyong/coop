@@ -1,6 +1,14 @@
 #pragma once
 
+#ifdef __clang__
+#include <experimental/coroutine>
+namespace std
+{
+    using experimental::coroutine_handle;
+}
+#else
 #include <coroutine>
+#endif
 #include <cstdint>
 
 namespace coop
@@ -29,13 +37,11 @@ public:
     static wait_result_t wait_many(event_ref_t* events, uint32_t count);
 
     event_ref_t() = default;
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
     event_ref_t(void* handle) noexcept
         : handle_{handle}
     {
     }
-#elif defined(__linux__)
-    // TODO: Android/Linux implementation
 #elif (__APPLE__)
     // TODO: MacOS/iOS implementation
 #endif
@@ -66,10 +72,8 @@ public:
 protected:
     friend class event_t;
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
     void* handle_ = nullptr;
-#elif defined(__linux__)
-    // TODO: Android/Linux implementation
 #elif (__APPLE__)
     // TODO: MacOS/iOS implementation
 #endif
@@ -79,13 +83,11 @@ class event_t final : public event_ref_t
 {
 public:
     event_t() = default;
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__linux__)
     event_t(void* handle) noexcept
         : event_ref_t{handle}
     {
     }
-#elif defined(__linux__)
-    // TODO: Android/Linux implementation
 #elif (__APPLE__)
     // TODO: MacOS/iOS implementation
 #endif
@@ -97,6 +99,8 @@ public:
 
     event_ref_t ref() const noexcept;
 
+    // The CPU affinity and priority set here are used to consider the
+    // *continuation* after this event is signaled
     void set_cpu_affinity(uint32_t affinity) noexcept
     {
         cpu_affinity_ = affinity;

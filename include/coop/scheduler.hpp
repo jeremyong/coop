@@ -4,7 +4,16 @@
 #include "detail/work_queue.hpp"
 #include "source_location.hpp"
 #include <atomic>
+#include "event.hpp"
+#ifdef __clang__
+#include <experimental/coroutine>
+namespace std
+{
+    using experimental::coroutine_handle;
+}
+#else
 #include <coroutine>
+#endif
 #include <cstdint>
 #include <mutex>
 #include <thread>

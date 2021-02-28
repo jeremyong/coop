@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <numbers>
 #include <thread>
+#include <cstring>
 
 using namespace coop;
 
@@ -45,6 +46,7 @@ scheduler_t::scheduler_t()
     // used to drive a low discrepancy sequence
     update_ = std::rand();
 
+#ifdef _WIN32
     event_thread_ = std::thread([this] {
         active_ = true;
         while (active_)
@@ -132,13 +134,16 @@ scheduler_t::scheduler_t()
             }
         }
     });
+#endif
 }
 
 scheduler_t::~scheduler_t() noexcept
 {
     active_ = false;
+#ifdef _WIN32
     events_[0].signal();
     event_thread_.join();
+#endif
     delete[] events_;
     delete[] event_continuations_;
 

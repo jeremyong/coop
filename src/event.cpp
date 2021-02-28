@@ -7,6 +7,7 @@
 #    define WIN32_LEAN_AND_MEAN
 #    include <Windows.h>
 #elif defined(__linux__)
+# include <pthread.h>
 #elif (__APPLE__)
 #endif
 

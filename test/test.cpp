@@ -105,6 +105,7 @@ TEST_CASE("multiple in flight")
     CHECK(ms < 150);
 }
 
+#ifdef _WIN32
 coop::task_t<void, true> wait_for_event(coop::event_t& event)
 {
     co_await event;
@@ -133,6 +134,7 @@ TEST_CASE("event completion")
         = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
     std::printf("Duration for event_completion test: %zu ms\n", ms);
 }
+#endif
 
 int main(int argc, char* argv[])
 {

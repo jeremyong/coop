@@ -13,8 +13,8 @@ programming languages. Users *do not* need to understand the C++20 coroutines AP
 
 ## Limitations
 
-- Currently only tested on Windows against MSVC (more platforms coming)
 - Requires a recent C++20 compiler and code that uses Coop headers must also use C++20
+- The "event_t" wrapper around Win32 events doesn't have equivalent functionality on other platforms yet
 
 ## Integration Guide
 
@@ -135,6 +135,8 @@ coop::task_t<> wait_for_event()
     co_await event;
 }
 ```
+
+In the future, support may be added for epoll and kqueue abstractions.
 
 ## Notice
 

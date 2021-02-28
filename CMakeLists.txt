@@ -16,9 +16,25 @@ option(COOP_ENABLE_TRACER "Verbose logging of all coroutine and scheduler events
 
 project(coop LANGUAGES CXX)
 
+if(STANDALONE)
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer -fsanitize=address")
+    set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -fsanitize=address")
+endif()
+
+find_package(Threads REQUIRED)
+
 add_library(coop INTERFACE)
 target_include_directories(coop INTERFACE include)
 target_compile_features(coop INTERFACE cxx_std_20)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(coop INTERFACE -stdlib=libc++)
+    target_link_options(coop INTERFACE -stdlib=libc++ -latomic)
+endif()
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # Currently, GCC requires this flag for coroutine language support
+    target_compile_options(coop INTERFACE -fcoroutines)
+endif()
+target_link_libraries(coop INTERFACE Threads::Threads)
 
 if(COOP_ENABLE_TRACER)
     target_compile_definitions(coop INTERFACE COOP_TRACE)

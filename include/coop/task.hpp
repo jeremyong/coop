@@ -1,12 +1,23 @@
 #pragma once
 
 #include "detail/tracer.hpp"
-#include "event.hpp"
 #include "scheduler.hpp"
 #include "source_location.hpp"
+#ifdef __clang__
+#include <experimental/coroutine>
+namespace std
+{
+    using experimental::suspend_never;
+    using experimental::noop_coroutine;
+}
+#else
 #include <coroutine>
+#endif
 #include <cstdlib>
 #include <limits>
+#include <condition_variable>
+#include <mutex>
+#include <unordered_map>
 
 namespace coop
 {
@@ -33,25 +44,101 @@ struct task_control_t final
 template <typename T>
 concept TaskControl = requires(T t, size_t size, void* ptr)
 {
+#ifndef __clang__
     {
         T::alloc(size)
     }
     ->std::same_as<void*>;
+#endif
     T::free(ptr);
 };
 
-template <typename T = void, bool Joinable = false, TaskControl C = task_control_t>
-class task_t final
+struct promise_base_t
+{
+    // When a coroutine suspends, the precursor stores the handle to the
+    // resume point, which immediately following the suspend point.
+    std::coroutine_handle<> precursor = nullptr;
+
+    // Do not suspend immediately on entry of a coroutine
+    std::suspend_never initial_suspend() const noexcept
+    {
+        return {};
+    }
+
+    void unhandled_exception() const noexcept
+    {
+        // Coop doesn't currently handle exceptions.
+    }
+};
+
+template <typename P>
+struct task_awaiter_t
+{
+    bool await_ready() const noexcept
+    {
+        return false;
+    }
+
+    void await_resume() const noexcept
+    {
+    }
+
+    std::coroutine_handle<>
+    await_suspend(std::coroutine_handle<P> coroutine) const noexcept
+    {
+        // Check if this coroutine is being finalized from the
+        // middle of a "precursor" coroutine and hop back there to
+        // continue execution while *this* coroutine is suspended.
+
+        auto precursor = coroutine.promise().precursor;
+        return precursor ? precursor : std::noop_coroutine();
+    }
+};
+
+template <bool Joinable>
+class task_base_t
+{
+protected:
+    using promise_type = promise_base_t;
+};
+
+template <>
+class task_base_t<true>
 {
 public:
-    struct promise_type
+    void join()
     {
-        // When a coroutine suspends, the precursor stores the handle to the
-        // resume point, which immediately following the suspend point.
-        std::coroutine_handle<> precursor;
+        std::unique_lock lock{join_data_->mutex};
+        join_data_->cvar.wait(lock, [this] { return join_data_->ready; });
+    }
 
-        event_ref_t event;
+protected:
+    struct join_data_t
+    {
+        std::condition_variable cvar;
+        std::mutex mutex;
+        bool ready = false;
+    };
 
+    struct promise_type : public promise_base_t
+    {
+        join_data_t* join_data;
+    };
+
+    void join_init()
+    {
+        join_data_ = std::make_unique<join_data_t>();
+    }
+
+    std::unique_ptr<join_data_t> join_data_;
+};
+
+template <typename T = void, bool Joinable = false, TaskControl C = task_control_t>
+class task_t final : public task_base_t<Joinable>
+{
+public:
+    struct promise_type : public task_base_t<Joinable>::promise_type
+    {
         T data;
 
         static void* operator new(size_t size)
@@ -71,10 +158,8 @@ public:
             task_t out{std::coroutine_handle<promise_type>::from_promise(*this)};
             if constexpr (Joinable)
             {
-                // For joinable tasks, initialize the event so we can wait on it
-                // later
-                out.event_.init();
-                event = out.event_.ref();
+                out.join_init();
+                this->join_data = out.join_data_.get();
             }
             return out;
         }
@@ -91,49 +176,16 @@ public:
             data = std::move(value);
         }
 
-        // Do not suspend immediately on entry of a coroutine
-        std::suspend_never initial_suspend() const noexcept
+        task_awaiter_t<promise_type> final_suspend() noexcept
         {
-            return {};
-        }
-
-        // Define what happens on coroutine exit
-        auto final_suspend() noexcept
-        {
-            struct awaiter_t
-            {
-                bool await_ready() const noexcept
-                {
-                    return false;
-                }
-
-                void await_resume() const noexcept
-                {
-                }
-
-                std::coroutine_handle<> await_suspend(
-                    std::coroutine_handle<promise_type> coroutine) const noexcept
-                {
-                    // Check if this coroutine is being finalized from the
-                    // middle of a "precursor" coroutine and hop back there to
-                    // continue execution while *this* coroutine is suspended.
-
-                    auto precursor = coroutine.promise().precursor;
-                    return precursor ? precursor : std::noop_coroutine();
-                }
-            };
-
             if constexpr (Joinable)
             {
-                event.signal();
+                std::scoped_lock lock{this->join_data->mutex};
+                this->join_data->ready = true;
+                this->join_data->cvar.notify_one();
             }
 
-            return awaiter_t{};
-        }
-
-        void unhandled_exception() const noexcept
-        {
-            // Coop doesn't currently handle exceptions.
+            return {};
         }
     };
 
@@ -141,28 +193,41 @@ public:
     task_t(std::coroutine_handle<promise_type> coroutine) noexcept
         : coroutine_{coroutine}
     {
+        COOP_LOG("Creating task at address %p\n", this);
     }
     task_t(task_t const&) = delete;
     task_t& operator=(task_t const&) = delete;
     task_t(task_t&& other) noexcept
     {
-        std::swap(coroutine_, other.coroutine_);
-        std::swap(event_, other.event_);
+        COOP_LOG("Moving task %p to address %p\n", &other, this);
+        if (coroutine_)
+        {
+            coroutine_.destroy();
+        }
+        coroutine_ = other.coroutine_;
+        other.coroutine_ = nullptr;
     }
     task_t& operator=(task_t&& other) noexcept
     {
-        if (this != other)
+        if (this != &other)
         {
-            std::swap(coroutine_, other.coroutine_);
-            std::swap(event_, other.event_);
+            COOP_LOG("Moving assigning task %p to address %p\n", &other, this);
+            if (coroutine_)
+            {
+                coroutine_.destroy();
+            }
+            coroutine_       = other.coroutine_;
+            other.coroutine_ = nullptr;
         }
         return *this;
     }
     ~task_t() noexcept
     {
+        COOP_LOG("Destroying task at address %p\n", this);
         if (coroutine_)
         {
             coroutine_.destroy();
+            coroutine_ = nullptr;
         }
     }
 
@@ -182,14 +247,6 @@ public:
     [[nodiscard]] T const& operator*() const noexcept
     {
         return coroutine_.promise().data;
-    }
-
-    void join() const
-    {
-        static_assert(Joinable,
-                      "Cannot join task that doesn't specify joinability as a "
-                      "template parameter");
-        event_.wait();
     }
 
     // When awaiting a task, avoid suspending at all if the associated coroutine
@@ -214,23 +271,17 @@ public:
     }
 
 private:
-    std::coroutine_handle<promise_type> coroutine_;
-    event_t event_;
+    std::coroutine_handle<promise_type> coroutine_ = nullptr;
 };
 
 // Explicit void specialization of task_t is identical except no data is
 // contained in the promise_type
 template <bool Joinable, TaskControl C>
-class task_t<void, Joinable, C>
+class task_t<void, Joinable, C> : public task_base_t<Joinable>
 {
 public:
-    struct promise_type
+    struct promise_type : public task_base_t<Joinable>::promise_type
     {
-        // When a coroutine suspends, the precursor stores the handle to the
-        // resume point, which immediately following the suspend point.
-        std::coroutine_handle<> precursor;
-        event_ref_t event;
-
         static void* operator new(size_t size)
         {
             return C::alloc(size);
@@ -248,10 +299,8 @@ public:
             task_t out{std::coroutine_handle<promise_type>::from_promise(*this)};
             if constexpr (Joinable)
             {
-                // For joinable tasks, initialize the event so we can wait on it
-                // later
-                out.event_.init();
-                event = out.event_.ref();
+                out.join_init();
+                this->join_data = out.join_data_.get();
             }
             return out;
         }
@@ -260,49 +309,16 @@ public:
         {
         }
 
-        // Do not suspend immediately on entry of a coroutine
-        std::suspend_never initial_suspend() const noexcept
+        task_awaiter_t<promise_type> final_suspend() noexcept
         {
-            return {};
-        }
-
-        // Define what happens on coroutine exit
-        auto final_suspend() noexcept
-        {
-            struct awaiter_t
-            {
-                bool await_ready() const noexcept
-                {
-                    return false;
-                }
-
-                void await_resume() const noexcept
-                {
-                }
-
-                std::coroutine_handle<> await_suspend(
-                    std::coroutine_handle<promise_type> coroutine) const noexcept
-                {
-                    // Check if this coroutine is being finalized from the
-                    // middle of a "precursor" coroutine and hop back there to
-                    // continue execution while *this* coroutine is suspended.
-
-                    auto precursor = coroutine.promise().precursor;
-                    return precursor ? precursor : std::noop_coroutine();
-                }
-            };
-
             if constexpr (Joinable)
             {
-                event.signal();
+                std::scoped_lock lock{this->join_data->mutex};
+                this->join_data->ready = true;
+                this->join_data->cvar.notify_one();
             }
 
-            return awaiter_t{};
-        }
-
-        void unhandled_exception() const noexcept
-        {
-            // Coop doesn't currently handle exceptions.
+            return {};
         }
     };
 
@@ -310,28 +326,41 @@ public:
     task_t(std::coroutine_handle<promise_type> coroutine) noexcept
         : coroutine_{coroutine}
     {
+        COOP_LOG("Creating task at address %p\n", this);
     }
     task_t(task_t const&) = delete;
     task_t& operator=(task_t const&) = delete;
     task_t(task_t&& other) noexcept
     {
-        std::swap(coroutine_, other.coroutine_);
-        std::swap(event_, other.event_);
+        COOP_LOG("Moving task %p to address %p\n", &other, this);
+        if (coroutine_)
+        {
+            coroutine_.destroy();
+        }
+        coroutine_ = other.coroutine_;
+        other.coroutine_ = nullptr;
     }
     task_t& operator=(task_t&& other) noexcept
     {
         if (this != &other)
         {
-            std::swap(coroutine_, other.coroutine_);
-            std::swap(event_, other.event_);
+            COOP_LOG("Moving assigning task %p to address %p\n", &other, this);
+            if (coroutine_)
+            {
+                coroutine_.destroy();
+            }
+            coroutine_       = other.coroutine_;
+            other.coroutine_ = nullptr;
         }
         return *this;
     }
     ~task_t() noexcept
     {
+        COOP_LOG("Destroying task at address %p\n", this);
         if (coroutine_)
         {
             coroutine_.destroy();
+            coroutine_ = nullptr;
         }
     }
 
@@ -339,14 +368,6 @@ public:
     operator bool() const noexcept
     {
         return !coroutine_ || coroutine_.done();
-    }
-
-    void join() const
-    {
-        static_assert(Joinable,
-                      "Cannot join task that doesn't specify joinability as a "
-                      "template parameter");
-        event_.wait();
     }
 
     // When awaiting a task, avoid suspending at all if the associated coroutine
@@ -368,8 +389,7 @@ public:
     }
 
 private:
-    std::coroutine_handle<promise_type> coroutine_;
-    event_t event_;
+    std::coroutine_handle<promise_type> coroutine_ = nullptr;
 };
 
 // Suspend the current coroutine to be scheduled for execution on a differeent
