@@ -1,13 +1,13 @@
 #pragma once
 
-#ifdef __clang__
-#include <experimental/coroutine>
+#if defined(__clang__)
+#    include <experimental/coroutine>
 namespace std
 {
-    using experimental::coroutine_handle;
+using experimental::coroutine_handle;
 }
 #else
-#include <coroutine>
+#    include <coroutine>
 #endif
 #include <cstdint>
 

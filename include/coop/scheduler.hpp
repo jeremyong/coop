@@ -5,7 +5,7 @@
 #include "event.hpp"
 #include "source_location.hpp"
 #include <atomic>
-#ifdef __clang__
+#if defined(__clang__)
 #    include <experimental/coroutine>
 namespace std
 {

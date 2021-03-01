@@ -4,9 +4,9 @@
 #include <cassert>
 #include <coop/detail/tracer.hpp>
 #include <cstdlib>
+#include <cstring>
 #include <numbers>
 #include <thread>
-#include <cstring>
 
 using namespace coop;
 
@@ -166,7 +166,7 @@ void scheduler_t::schedule(std::coroutine_handle<> coroutine,
 
     for (uint32_t i = 0; i != cpu_count_; ++i)
     {
-        if (cpu_affinity & (1 << i))
+        if (cpu_affinity & (1ull << i))
         {
             if (queues_[i].size_approx() == 0)
             {

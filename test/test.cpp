@@ -7,13 +7,13 @@
 
 coop::task_t<> suspend_test1()
 {
-    co_await coop::suspend();
+    COOP_SUSPEND();
 }
 
 coop::task_t<void, true> suspend_test2()
 {
     auto t1 = std::chrono::system_clock::now();
-    co_await suspend_test1();
+    COOP_SUSPEND();
     auto t2 = std::chrono::system_clock::now();
     size_t us
         = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
@@ -27,7 +27,7 @@ TEST_CASE("suspend overhead")
 
 coop::task_t<void, true> test_suspend(std::thread::id& id)
 {
-    co_await coop::suspend();
+    COOP_SUSPEND();
     id = std::this_thread::get_id();
     co_return;
 }
@@ -44,7 +44,7 @@ TEST_CASE("test suspend")
 
 coop::task_t<int> chain1()
 {
-    co_await coop::suspend();
+    COOP_SUSPEND();
     co_return 1;
 }
 
@@ -69,7 +69,7 @@ TEST_CASE("chained continuation")
 
 coop::task_t<> in_flight1()
 {
-    co_await coop::suspend();
+    COOP_SUSPEND();
     std::this_thread::sleep_for(std::chrono::milliseconds{50});
 }
 
@@ -113,7 +113,7 @@ coop::task_t<void, true> wait_for_event(coop::event_t& event)
 
 coop::task_t<void, true> signal_event(coop::event_t& event)
 {
-    co_await coop::suspend();
+    COOP_SUSPEND();
     std::this_thread::sleep_for(std::chrono::milliseconds{50});
     event.signal();
 }

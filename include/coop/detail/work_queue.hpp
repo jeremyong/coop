@@ -4,7 +4,7 @@
 #include <atomic>
 #include <coop/source_location.hpp>
 #include <semaphore>
-#ifdef __clang__
+#if defined(__clang__)
 #    include <experimental/coroutine>
 namespace std
 {

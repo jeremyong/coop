@@ -15,6 +15,21 @@ programming languages. Users *do not* need to understand the C++20 coroutines AP
 
 - Requires a recent C++20 compiler and code that uses Coop headers must also use C++20
 - The "event_t" wrapper around Win32 events doesn't have equivalent functionality on other platforms yet
+- The Clang implementation of the coroutines API at the moment doesn't work with the GCC stdlib++, so use libc++ instead
+- Clang on Windows does not yet support the MSVC coroutines runtime due to ABI differences
+
+## Building and Running the Tests
+
+When configured as a standalone project, the built-in scheduler and tests are enabled by default. To configure and build the project
+from the command line:
+
+```bash
+mkdir build
+cd build
+cmake .. # Supply your own generator if you don't want the default generator
+cmake --build .
+./test/coop_test
+```
 
 ## Integration Guide
 
@@ -137,6 +152,85 @@ coop::task_t<> wait_for_event()
 ```
 
 In the future, support may be added for epoll and kqueue abstractions.
+
+## Convenience macro `COOP_SUSPEND#`
+
+The full function signature of the `suspend` function is the following:
+
+```c++
+template <Scheduler S = scheduler_t>
+inline auto suspend(S& scheduler                             = S::instance(),
+                    uint64_t cpu_mask                        = 0,
+                    uint32_t priority                        = 0,
+                    source_location_t const& source_location = {}) noexcept
+```
+
+and you must await the returned result. Instead, you can use the family of macros and simply write
+
+```
+COOP_SUSPEND();
+```
+
+if you are comfortable with the default behavior. This macro will supply `__FILE__` and `__LINE__` information
+to the `source_location` paramter to get additional tracking. Other macros with numerical suffixes to `COOP_SUSPEND` are
+also provided to allow you to override a subset of parameters as needed.
+
+## (Optional) Override default allocators
+
+By default, coroutine frames are allocated via `operator new` and `operator delete`. Remember that the coroutine frames may not
+always allocate if the compiler can prove the allocation isn't necessary. That said, if you'd like to override the allocator
+with your own (for tracking purposes, or to use a different more specialized allocator), simply provide a `TaskControl` concept
+conforming type as the third template parameter of `task_t`. The full template type signature of a `task_t` is as follows:
+
+```c++
+template <typename T = void, bool Joinable = false, TaskControl C = task_control_t>
+class task_t;
+```
+
+The first template parameter refers to the type that should be `co_return`ed by the coroutine. The `Joinable` parameter indicates
+whether this task should create a `binary_semaphore` which is signaled on completion (and provides the `task_t::join` method to
+wait on the semaphore). The last parameter is any type that has an `alloc` and `free` function. By default, the `TaskControl` type
+is the one below:
+
+
+```c++
+struct task_control_t final
+{
+    static void* alloc(size_t size)
+    {
+        return operator new(size);
+    }
+
+    static void free(void* ptr)
+    {
+        operator delete(ptr);
+    }
+};
+```
+
+## (Optional) Use your own scheduler
+
+Coop is designed to be a pretty thin abstraction layer to make writing async code more convenient. If you already have a robust
+scheduler and thread pool, you don't have to use the one provided here. The `coop::suspend` function is templated and accepts
+an optional first parameter to a class that implements the `Scheduler` concept. To qualify as a `Scheduler`, a class only needs
+to implement the following function signature:
+
+```c++
+    void schedule(std::coroutine_handle<> coroutine,
+                  uint64_t cpu_affinity             = 0,
+                  uint32_t priority                 = 0,
+                  source_location_t source_location = {});
+```
+
+Then, at the opportune time on a thread of your choosing, simply call `coroutine.resume()`. Remember that when implementing your
+own scheduler, you are responsible for thread safety and ensuring that the "usual" bugs (like missed notifications) are ironed out.
+You can ignore the cpu affinity and priority flags if you don't need this functionality (i.e. if you aren't targeting a NUMA).
+
+## Hack away
+
+The source code of Coop is pretty small all things considered, with the core of its functionality contained in only a few hundred
+lines of commented code. Feel free to take it and adapt it for your use case. This was the route taken as opposed to making every
+design aspect customizable (which would have made the interface far more complicated).
 
 ## Notice
 

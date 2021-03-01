@@ -1,5 +1,6 @@
 #include <coop/detail/work_queue.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <coop/detail/tracer.hpp>
 #include <cstdio>
@@ -52,16 +53,25 @@ work_queue_t::work_queue_t(scheduler_t& scheduler, uint32_t id)
                 return;
             }
 
-            for (int i = COOP_PRIORITY_COUNT - 1; i >= 0; --i)
+            bool did_dequeue = false;
+
+            // Dequeue in a loop because the concurrent queue isn't sequentially
+            // consistent
+            while (!did_dequeue)
             {
-                std::coroutine_handle<> coroutine;
-                if (queues_[i].try_dequeue(coroutine))
+                for (int i = COOP_PRIORITY_COUNT - 1; i >= 0; --i)
                 {
-                    COOP_LOG("Dequeueing coroutine on CPU %i thread %i\n",
-                             id_,
-                             std::this_thread::get_id());
-                    coroutine.resume();
-                    break;
+                    std::coroutine_handle<> coroutine;
+                    if (queues_[i].try_dequeue(coroutine))
+                    {
+                        COOP_LOG("Dequeueing coroutine on CPU %i thread %zu\n",
+                                 id_,
+                                 std::hash<std::thread::id>{}(
+                                     std::this_thread::get_id()));
+                        did_dequeue = true;
+                        coroutine.resume();
+                        break;
+                    }
                 }
             }
 
@@ -81,6 +91,7 @@ void work_queue_t::enqueue(std::coroutine_handle<> coroutine,
                            uint32_t priority,
                            source_location_t source_location)
 {
+    priority = std::clamp<uint32_t>(priority, 0, COOP_PRIORITY_COUNT);
     COOP_LOG("Enqueueing coroutine on CPU %i (%s:%zu)\n",
              id_,
              source_location.file,

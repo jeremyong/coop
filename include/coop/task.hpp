@@ -3,7 +3,7 @@
 #include "detail/tracer.hpp"
 #include "scheduler.hpp"
 #include "source_location.hpp"
-#ifdef __clang__
+#if defined(__clang__)
 #    include <experimental/coroutine>
 namespace std
 {
@@ -20,26 +20,21 @@ using experimental::suspend_never;
 
 namespace coop
 {
-// This is the default "payload" and configuration associated with a task. If
-// you'd like to include additional information, simply create your own struct
-// or class and specify it as the second template parameter of the task_t below.
-// Use information here *might* be thread or cpu affinity, priority, debug
-// information, etc.
-//
-// It can have state, and also override functionality
 struct task_control_t final
 {
     static void* alloc(size_t size)
     {
-        return std::malloc(size);
+        return operator new(size);
     }
 
     static void free(void* ptr)
     {
-        std::free(ptr);
+        operator delete(ptr);
     }
 };
 
+// Conform to the TaskControl concept below and pass it as the third template
+// parameter to `task_t` to override the allocation behavior
 template <typename T>
 concept TaskControl = requires(T t, size_t size, void* ptr)
 {
@@ -52,11 +47,14 @@ concept TaskControl = requires(T t, size_t size, void* ptr)
     T::free(ptr);
 };
 
+// All promises need the `continuation` member, which is set when a coroutine is
+// suspended within another coroutine. The `continuation` handle is used to hop
+// back from that suspension point when the inner coroutine finishes.
 struct promise_base_t
 {
-    // When a coroutine suspends, the precursor stores the handle to the
+    // When a coroutine suspends, the continuation stores the handle to the
     // resume point, which immediately following the suspend point.
-    std::coroutine_handle<> precursor = nullptr;
+    std::coroutine_handle<> continuation = nullptr;
 
     // Do not suspend immediately on entry of a coroutine
     std::suspend_never initial_suspend() const noexcept
@@ -86,17 +84,12 @@ struct task_awaiter_t
     await_suspend(std::coroutine_handle<P> coroutine) const noexcept
     {
         // Check if this coroutine is being finalized from the
-        // middle of a "precursor" coroutine and hop back there to
+        // middle of a "continuation" coroutine and hop back there to
         // continue execution while *this* coroutine is suspended.
 
-        auto precursor = coroutine.promise().precursor;
-        return precursor ? precursor : std::noop_coroutine();
+        auto continuation = coroutine.promise().continuation;
+        return continuation ? continuation : std::noop_coroutine();
     }
-};
-
-struct join_data_t
-{
-    std::binary_semaphore sem{0};
 };
 
 template <bool Joinable>
@@ -106,27 +99,29 @@ protected:
     using promise_type = promise_base_t;
 };
 
+// For tasks that are joinable, on construction they also allocate a binary
+// semaphore (memory stability is required) which is signaled on task completion
 template <>
 class task_base_t<true>
 {
 public:
     void join()
     {
-        join_data_->sem.acquire();
+        join_sem_->acquire();
     }
 
 protected:
     struct promise_type : public promise_base_t
     {
-        join_data_t* join_data = nullptr;
+        std::binary_semaphore* join_sem = nullptr;
     };
 
     void join_init()
     {
-        join_data_ = std::make_unique<join_data_t>();
+        join_sem_ = std::make_unique<std::binary_semaphore>(0);
     }
 
-    std::unique_ptr<join_data_t> join_data_;
+    std::unique_ptr<std::binary_semaphore> join_sem_;
 };
 
 template <typename T = void, bool Joinable = false, TaskControl C = task_control_t>
@@ -149,13 +144,13 @@ public:
 
         task_t get_return_object() noexcept
         {
-            // On coroutine entry, we store as the precursor a handle
+            // On coroutine entry, we store as the continuation a handle
             // corresponding to the next sequence point from the caller.
             task_t out{std::coroutine_handle<promise_type>::from_promise(*this)};
             if constexpr (Joinable)
             {
                 out.join_init();
-                this->join_data = out.join_data_.get();
+                this->join_sem = out.join_sem_.get();
             }
             return out;
         }
@@ -176,7 +171,7 @@ public:
         {
             if constexpr (Joinable)
             {
-                this->join_data->sem.release();
+                this->join_sem->release();
             }
 
             return {};
@@ -204,7 +199,7 @@ public:
         // member field isn't invoked (??)
         if constexpr (Joinable)
         {
-            this->join_data_ = std::move(other.join_data_);
+            this->join_sem_ = std::move(other.join_sem_);
         }
 #endif
     }
@@ -224,7 +219,7 @@ public:
             // template member field isn't invoked (??)
             if constexpr (Joinable)
             {
-                this->join_data_ = std::move(other.join_data_);
+                this->join_sem_ = std::move(other.join_sem_);
             }
 #endif
         }
@@ -275,7 +270,7 @@ public:
     // resume point (to be resumed when the inner coroutine finalizes)
     void await_suspend(std::coroutine_handle<> coroutine) const noexcept
     {
-        coroutine_.promise().precursor = coroutine;
+        coroutine_.promise().continuation = coroutine;
     }
 
 private:
@@ -302,13 +297,13 @@ public:
 
         task_t get_return_object() noexcept
         {
-            // On coroutine entry, we store as the precursor a handle
+            // On coroutine entry, we store as the continuation a handle
             // corresponding to the next sequence point from the caller.
             task_t out{std::coroutine_handle<promise_type>::from_promise(*this)};
             if constexpr (Joinable)
             {
                 out.join_init();
-                this->join_data = out.join_data_.get();
+                this->join_sem = out.join_sem_.get();
             }
             return out;
         }
@@ -321,7 +316,7 @@ public:
         {
             if constexpr (Joinable)
             {
-                this->join_data->sem.release();
+                this->join_sem->release();
             }
 
             return {};
@@ -349,7 +344,7 @@ public:
         // template member field isn't invoked (??)
         if constexpr (Joinable)
         {
-            this->join_data_ = std::move(other.join_data_);
+            this->join_sem_ = std::move(other.join_sem_);
         }
 #endif
     }
@@ -369,7 +364,7 @@ public:
             // template member field isn't invoked (??)
             if constexpr (Joinable)
             {
-                this->join_data_ = std::move(other.join_data_);
+                this->join_sem_ = std::move(other.join_sem_);
             }
 #endif
         }
@@ -405,7 +400,7 @@ public:
     // resume point (to be resumed when the inner coroutine finalizes)
     void await_suspend(std::coroutine_handle<> coroutine) const noexcept
     {
-        coroutine_.promise().precursor = coroutine;
+        coroutine_.promise().continuation = coroutine;
     }
 
 private:
@@ -450,8 +445,33 @@ inline auto suspend(S& scheduler                             = S::instance(),
         }
     };
 
-    COOP_LOG("Suspending coroutine from thread %i\n", std::this_thread::get_id());
+    COOP_LOG("Suspending coroutine from thread %zu\n",
+             std::hash<std::thread::id>{}(std::this_thread::get_id()));
 
     return awaiter_t{scheduler, cpu_mask, priority, source_location};
 }
+
+#define COOP_SUSPEND()        \
+    co_await ::coop::suspend( \
+        ::coop::scheduler_t::instance(), 0, 0, {__FILE__, __LINE__})
+
+#define COOP_SUSPEND1(scheduler) \
+    co_await ::coop::suspend(scheduler, 0, 0, {__FILE__, __LINE__})
+
+#define COOP_SUSPEND2(scheduler, cpu_mask) \
+    co_await ::coop::suspend(scheduler, cpu_mask, 0, {__FILE__, __LINE__})
+
+#define COOP_SUSPEND3(scheduler, cpu_mask, priority) \
+    co_await ::coop::suspend(                        \
+        scheduler, cpu_mask, priority, {__FILE__, __LINE__})
+
+#define COOP_SUSPEND4(cpu_mask) \
+    co_await ::coop::suspend(   \
+        ::coop::scheduler_t::instance(), cpu_mask, 0, {__FILE__, __LINE__})
+
+#define COOP_SUSPEND5(cpu_mask, priority)                     \
+    co_await ::coop::suspend(::coop::scheduler_t::instance(), \
+                             cpu_mask,                        \
+                             priority,                        \
+                             {__FILE__, __LINE__})
 } // namespace coop
