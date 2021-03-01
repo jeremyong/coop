@@ -102,6 +102,44 @@ coop::task_t<int> coroutine_with_data()
 When the task above is awaited via the `co_await` operator, what results is the int returned via `co_return`.
 Of course, passing other types is possible by changing the first template parameter of `task_t`.
 
+Tasks let you do multiple async operations simultaneously, for example:
+
+```c++
+coop::task_t<> my_task(int ms)
+{
+    co_await coop::suspend();
+
+    // Fake some work with a timer
+    std::this_thread::sleep_for(std::chrono::milliseconds{ms});
+}
+
+coop::task_t<> big_coroutine()
+{
+    auto t1 = my_task(50);
+    auto t2 = my_task(40);
+    auto t3 = my_task(80);
+
+    // 3 invocations of `my_task` are now potentially running concurrently on different threads
+
+    do_something_useful();
+
+    // Block until t2 is done
+    co_await t2;
+
+    // Right now, t1 and t3 are *potentially* still running
+
+    do_something_else();
+
+    co_await t1;
+    co_await t3;
+
+    // Now, all three tasks are complete
+}
+```
+
+One thing to keep in mind is that after awaiting a task, the thread you resume on is *not* necessarily the same thread
+you were on originally.
+
 What if you want to await a task from `main` or some other execution context that isn't a coroutine? For this, you can
 make a joinable task and `join` it.
 
