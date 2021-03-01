@@ -2,17 +2,16 @@
 
 #include "concurrentqueue.h"
 #include <atomic>
-#include <condition_variable>
-#include <mutex>
 #include <coop/source_location.hpp>
+#include <semaphore>
 #ifdef __clang__
-#include <experimental/coroutine>
+#    include <experimental/coroutine>
 namespace std
 {
-    using experimental::coroutine_handle;
+using experimental::coroutine_handle;
 }
 #else
-#include <coroutine>
+#    include <coroutine>
 #endif
 #include <thread>
 
@@ -56,15 +55,11 @@ namespace detail
         uint32_t id_;
         std::thread thread_;
         std::atomic<bool> active_;
-        std::condition_variable cvar_;
-        std::mutex mutex_;
+        std::counting_semaphore<> sem_;
 
         moodycamel::ConcurrentQueue<std::coroutine_handle<>>
             queues_[COOP_PRIORITY_COUNT];
 
-        // This sentinel noop coroutine is enqueued to signal the thread should
-        // be torn down
-        std::coroutine_handle<> completion_sentinel_;
         char label_[64];
     };
 } // namespace detail

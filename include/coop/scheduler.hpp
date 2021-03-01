@@ -2,20 +2,19 @@
 
 #include "detail/concurrentqueue.h"
 #include "detail/work_queue.hpp"
+#include "event.hpp"
 #include "source_location.hpp"
 #include <atomic>
-#include "event.hpp"
 #ifdef __clang__
-#include <experimental/coroutine>
+#    include <experimental/coroutine>
 namespace std
 {
-    using experimental::coroutine_handle;
+using experimental::coroutine_handle;
 }
 #else
-#include <coroutine>
+#    include <coroutine>
 #endif
 #include <cstdint>
-#include <mutex>
 #include <thread>
 
 namespace coop

@@ -13,10 +13,9 @@ using experimental::suspend_never;
 #else
 #    include <coroutine>
 #endif
-#include <condition_variable>
 #include <cstdlib>
 #include <limits>
-#include <mutex>
+#include <semaphore>
 #include <unordered_map>
 
 namespace coop
@@ -97,9 +96,7 @@ struct task_awaiter_t
 
 struct join_data_t
 {
-    std::condition_variable cvar;
-    std::mutex mutex;
-    bool ready = false;
+    std::binary_semaphore sem{0};
 };
 
 template <bool Joinable>
@@ -115,8 +112,7 @@ class task_base_t<true>
 public:
     void join()
     {
-        std::unique_lock lock{join_data_->mutex};
-        join_data_->cvar.wait(lock, [this] { return join_data_->ready; });
+        join_data_->sem.acquire();
     }
 
 protected:
@@ -180,9 +176,7 @@ public:
         {
             if constexpr (Joinable)
             {
-                std::scoped_lock lock{this->join_data->mutex};
-                this->join_data->ready = true;
-                this->join_data->cvar.notify_one();
+                this->join_data->sem.release();
             }
 
             return {};
@@ -327,9 +321,7 @@ public:
         {
             if constexpr (Joinable)
             {
-                std::scoped_lock lock{this->join_data->mutex};
-                this->join_data->ready = true;
-                this->join_data->cvar.notify_one();
+                this->join_data->sem.release();
             }
 
             return {};
