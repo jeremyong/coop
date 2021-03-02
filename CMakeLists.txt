@@ -13,12 +13,13 @@ endif()
 option(COOP_BUILD_PROCESSOR "Build the provided coop processor" ${STANDALONE})
 option(COOP_BUILD_TESTS "Build coop tests" ${STANDALONE})
 option(COOP_ENABLE_TRACER "Verbose logging of all coroutine and scheduler events" ${STANDALONE})
+option(COOP_ENABLE_ASAN "Enable ASAN" OFF)
 
 project(coop LANGUAGES CXX)
 
-if(STANDALONE AND NOT WIN32)
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer -fsanitize=address")
-    set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -fsanitize=address")
+if(COOP_ENABLE_ASAN AND NOT WIN32)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
+    set(CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
 endif()
 
 find_package(Threads REQUIRED)

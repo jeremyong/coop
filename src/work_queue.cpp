@@ -64,10 +64,12 @@ work_queue_t::work_queue_t(scheduler_t& scheduler, uint32_t id)
                     std::coroutine_handle<> coroutine;
                     if (queues_[i].try_dequeue(coroutine))
                     {
-                        COOP_LOG("Dequeueing coroutine on CPU %i thread %zu\n",
-                                 id_,
-                                 std::hash<std::thread::id>{}(
-                                     std::this_thread::get_id()));
+                        COOP_LOG(
+                            "Dequeueing coroutine on CPU %i thread %zu %i\n",
+                            id_,
+                            std::hash<std::thread::id>{}(
+                                std::this_thread::get_id()),
+                            coroutine.done());
                         did_dequeue = true;
                         coroutine.resume();
                         break;

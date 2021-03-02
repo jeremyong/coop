@@ -69,7 +69,7 @@ struct promise_base_t
 };
 
 template <typename P>
-struct task_awaiter_t
+struct final_awaiter_t
 {
     bool await_ready() const noexcept
     {
@@ -80,15 +80,18 @@ struct task_awaiter_t
     {
     }
 
-    std::coroutine_handle<>
-    await_suspend(std::coroutine_handle<P> coroutine) const noexcept
+    std::coroutine_handle<> await_suspend(std::coroutine_handle<P> coroutine) const noexcept
     {
         // Check if this coroutine is being finalized from the
         // middle of a "continuation" coroutine and hop back there to
         // continue execution while *this* coroutine is suspended.
 
         auto continuation = coroutine.promise().continuation;
-        return continuation ? continuation : std::noop_coroutine();
+        if (continuation)
+        {
+            return continuation;
+        }
+        return std::noop_coroutine();
     }
 };
 
@@ -159,21 +162,26 @@ public:
         return_value(T const& value) noexcept(std::is_nothrow_copy_assignable_v<T>)
         {
             data = value;
+
+            if constexpr (Joinable)
+            {
+                this->join_sem->release();
+            }
         }
 
         void
         return_value(T&& value) noexcept(std::is_nothrow_move_assignable_v<T>)
         {
             data = std::move(value);
-        }
 
-        task_awaiter_t<promise_type> final_suspend() noexcept
-        {
             if constexpr (Joinable)
             {
                 this->join_sem->release();
             }
+        }
 
+        final_awaiter_t<promise_type> final_suspend() noexcept
+        {
             return {};
         }
     };
@@ -182,6 +190,7 @@ public:
     task_t(std::coroutine_handle<promise_type> coroutine) noexcept
         : coroutine_{coroutine}
     {
+        COOP_LOG("task %p born\n", coroutine_.address());
     }
     task_t(task_t const&) = delete;
     task_t& operator=(task_t const&) = delete;
@@ -229,8 +238,8 @@ public:
     {
         if (coroutine_)
         {
+            COOP_LOG("task %p dying\n", coroutine_.address());
             coroutine_.destroy();
-            coroutine_ = nullptr;
         }
     }
 
@@ -252,11 +261,9 @@ public:
         return coroutine_.promise().data;
     }
 
-    // When awaiting a task, avoid suspending at all if the associated coroutine
-    // is finished already
     bool await_ready() const noexcept
     {
-        return coroutine_.done();
+        return !coroutine_ || coroutine_.done();
     }
 
     // The return value of await_resume is the final result of `co_await
@@ -266,9 +273,10 @@ public:
         return std::move(coroutine_.promise().data);
     }
 
-    // When suspending from a coroutine *within* this task's coroutine, save the
+    // When suspending from a coroutine *within* a task's coroutine, save the
     // resume point (to be resumed when the inner coroutine finalizes)
-    void await_suspend(std::coroutine_handle<> coroutine) const noexcept
+    void
+    await_suspend(std::coroutine_handle<> coroutine) noexcept
     {
         coroutine_.promise().continuation = coroutine;
     }
@@ -310,15 +318,14 @@ public:
 
         void return_void() const noexcept
         {
-        }
-
-        task_awaiter_t<promise_type> final_suspend() noexcept
-        {
             if constexpr (Joinable)
             {
                 this->join_sem->release();
             }
+        }
 
+        final_awaiter_t<promise_type> final_suspend() noexcept
+        {
             return {};
         }
     };
@@ -327,6 +334,7 @@ public:
     task_t(std::coroutine_handle<promise_type> coroutine) noexcept
         : coroutine_{coroutine}
     {
+        COOP_LOG("task %p born\n", coroutine_.address());
     }
     task_t(task_t const&) = delete;
     task_t& operator=(task_t const&) = delete;
@@ -374,8 +382,8 @@ public:
     {
         if (coroutine_)
         {
+            COOP_LOG("task %p dying\n", coroutine_.address());
             coroutine_.destroy();
-            coroutine_ = nullptr;
         }
     }
 
@@ -385,11 +393,9 @@ public:
         return !coroutine_ || coroutine_.done();
     }
 
-    // When awaiting a task, avoid suspending at all if the associated coroutine
-    // is finished already
     bool await_ready() const noexcept
     {
-        return coroutine_.done();
+        return !coroutine_ || coroutine_.done();
     }
 
     void await_resume() const noexcept
@@ -398,7 +404,8 @@ public:
 
     // When suspending from a coroutine *within* this task's coroutine, save the
     // resume point (to be resumed when the inner coroutine finalizes)
-    void await_suspend(std::coroutine_handle<> coroutine) const noexcept
+    void
+    await_suspend(std::coroutine_handle<> coroutine) noexcept
     {
         coroutine_.promise().continuation = coroutine;
     }

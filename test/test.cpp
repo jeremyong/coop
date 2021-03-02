@@ -22,7 +22,9 @@ coop::task_t<void, true> suspend_test2()
 
 TEST_CASE("suspend overhead")
 {
+    std::printf("Calling suspend_test2 coroutine\n");
     suspend_test2().join();
+    std::printf("suspend_test2 joined\n");
 }
 
 coop::task_t<void, true> test_suspend(std::thread::id& id)
@@ -37,25 +39,33 @@ TEST_CASE("test suspend")
     std::thread::id id = std::this_thread::get_id();
     std::thread::id next;
     auto task = test_suspend(next);
+    std::printf("Joining task\n");
     task.join();
+    std::printf("Task joined\n");
 
     CHECK(id != next);
 }
 
 coop::task_t<int> chain1()
 {
+    std::printf("chain1 suspending\n");
     COOP_SUSPEND();
+    std::printf("chain1 resumed\n");
     co_return 1;
 }
 
 coop::task_t<int> chain2()
 {
+    std::printf("chain2\n");
+    COOP_SUSPEND();
     co_return co_await chain1();
 }
 
 coop::task_t<void, true> chain3(int& result)
 {
+    std::printf("chain3 suspending\n");
     co_await coop::suspend(coop::scheduler_t::instance(), 0x2);
+    std::printf("chain3 resumed\n");
     result = co_await chain2();
 }
 
@@ -63,7 +73,9 @@ TEST_CASE("chained continuation")
 {
     int x     = 0;
     auto task = chain3(x);
+    std::printf("Joining chained continuation task\n");
     task.join();
+    std::printf("Task chained continuation joined\n");
     CHECK(x == 1);
 }
 
