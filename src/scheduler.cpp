@@ -181,7 +181,16 @@ void scheduler_t::schedule(std::coroutine_handle<> coroutine,
     // discrepancy (Kronecker recurrence sequence)
     uint32_t index = static_cast<uint32_t>(update_++ * std::numbers::phi_v<float>)
                      % std::popcount(cpu_affinity);
-    queues_[index].enqueue(coroutine, priority, source_location);
+
+    // Iteratively unset bits to determine the nth set bit
+    for (uint32_t i = 0; i != index; ++i)
+    {
+        cpu_affinity &= ~(1 << (std::countr_zero(cpu_affinity) + 1));
+    }
+    uint32_t queue = std::countr_zero(cpu_affinity);
+    COOP_LOG("Work queue %i identified\n", queue);
+
+    queues_[queue].enqueue(coroutine, priority, source_location);
 }
 
 void scheduler_t::schedule(std::coroutine_handle<> coroutine,

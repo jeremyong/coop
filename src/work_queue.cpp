@@ -26,7 +26,7 @@ work_queue_t::work_queue_t(scheduler_t& scheduler, uint32_t id)
     thread_ = std::thread([this] {
 #if defined(_WIN32)
         SetThreadAffinityMask(
-            thread_.native_handle(), static_cast<uint32_t>(1ull << id_));
+            GetCurrentThread(), static_cast<uint32_t>(1ull << id_));
 #elif defined(__linux__)
         // TODO: Android implementation
         pthread_t thread = pthread_self();
@@ -64,12 +64,10 @@ work_queue_t::work_queue_t(scheduler_t& scheduler, uint32_t id)
                     std::coroutine_handle<> coroutine;
                     if (queues_[i].try_dequeue(coroutine))
                     {
-                        COOP_LOG(
-                            "Dequeueing coroutine on CPU %i thread %zu %i\n",
-                            id_,
-                            std::hash<std::thread::id>{}(
-                                std::this_thread::get_id()),
-                            coroutine.done());
+                        COOP_LOG("Dequeueing coroutine %p on thread %zu (%i)\n",
+                                 coroutine.address(),
+                                 detail::thread_id(),
+                                 id_);
                         did_dequeue = true;
                         coroutine.resume();
                         break;
@@ -93,9 +91,10 @@ void work_queue_t::enqueue(std::coroutine_handle<> coroutine,
                            uint32_t priority,
                            source_location_t source_location)
 {
-    priority = std::clamp<uint32_t>(priority, 0, COOP_PRIORITY_COUNT);
-    COOP_LOG("Enqueueing coroutine on CPU %i (%s:%zu)\n",
-             id_,
+    priority = std::clamp<uint32_t>(priority, 0, COOP_PRIORITY_COUNT - 1);
+    COOP_LOG("Enqueueing coroutine %p on thread %zu (%s:%zu)\n",
+             coroutine.address(),
+             detail::thread_id(),
              source_location.file,
              source_location.line);
     queues_[priority].enqueue(coroutine);

@@ -5,16 +5,13 @@
 #include <coop/task.hpp>
 #include <thread>
 
-coop::task_t<> suspend_test1()
+coop::task_t<void, true> suspend_time()
 {
-    COOP_SUSPEND();
-}
-
-coop::task_t<void, true> suspend_test2()
-{
+    // std::printf("%zu start thread\n", coop::detail::thread_id());
     auto t1 = std::chrono::system_clock::now();
     COOP_SUSPEND();
     auto t2 = std::chrono::system_clock::now();
+    // std::printf("%zu end thread\n", coop::detail::thread_id());
     size_t us
         = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
     std::printf("Duration for suspend test: %zu us\n", us);
@@ -23,7 +20,9 @@ coop::task_t<void, true> suspend_test2()
 TEST_CASE("suspend overhead")
 {
     std::printf("Calling suspend_test2 coroutine\n");
-    suspend_test2().join();
+    // auto task = suspend_time();
+    // task.join();
+    suspend_time().join();
     std::printf("suspend_test2 joined\n");
 }
 
@@ -46,10 +45,10 @@ TEST_CASE("test suspend")
     CHECK(id != next);
 }
 
-coop::task_t<int> chain1()
+coop::task_t<int> chain1(int core)
 {
     std::printf("chain1 suspending\n");
-    COOP_SUSPEND();
+    COOP_SUSPEND4(1 << core);
     std::printf("chain1 resumed\n");
     co_return 1;
 }
@@ -57,14 +56,16 @@ coop::task_t<int> chain1()
 coop::task_t<int> chain2()
 {
     std::printf("chain2\n");
-    COOP_SUSPEND();
-    co_return co_await chain1();
+    COOP_SUSPEND4(1 << 3);
+    auto t1 = chain1(5);
+    auto t2 = chain1(6);
+    co_return co_await t1 + co_await t2;
 }
 
 coop::task_t<void, true> chain3(int& result)
 {
     std::printf("chain3 suspending\n");
-    co_await coop::suspend(coop::scheduler_t::instance(), 0x2);
+    COOP_SUSPEND4(1 << 4);
     std::printf("chain3 resumed\n");
     result = co_await chain2();
 }
@@ -76,7 +77,7 @@ TEST_CASE("chained continuation")
     std::printf("Joining chained continuation task\n");
     task.join();
     std::printf("Task chained continuation joined\n");
-    CHECK(x == 1);
+    CHECK(x == 2);
 }
 
 coop::task_t<> in_flight1()

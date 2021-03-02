@@ -19,7 +19,11 @@ That is, it doesn't get requeued on the thread pool for later execution.
 
 The concurrent queue used to push work to worker threads is provided by [`moodycamel::ConcurrentQueue`](https://github.com/cameron314/concurrentqueue).
 Under the hood, the queue provides multiple-consumer multiple-producer usage, although in this case, only a single producer per queue
-exists.
+exists. The thread pool worker threads currently do *not* support work stealing, which is a slightly more complicated endeavor
+for job schedulers that support task affinity.
+
+The granularity of your jobs shouldn't be too fine - maybe having jobs that are at least 100 us or more is a good idea, or you'll
+end up paying disproportionately for scheduling costs.
 
 The Win32 event awaiter works by having a single IO thread which blocks in a single `WaitForMultipleObjects` call. One of the
 events it waits on is used to signal the available of more events to wait on. All the other events waited on are user awaited.

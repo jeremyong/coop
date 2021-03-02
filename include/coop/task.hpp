@@ -15,8 +15,7 @@ using experimental::suspend_never;
 #endif
 #include <cstdlib>
 #include <limits>
-#include <semaphore>
-#include <unordered_map>
+#include <mutex>
 
 namespace coop
 {
@@ -56,6 +55,9 @@ struct promise_base_t
     // resume point, which immediately following the suspend point.
     std::coroutine_handle<> continuation = nullptr;
 
+    std::mutex mutex;
+    bool flag = false;
+
     // Do not suspend immediately on entry of a coroutine
     std::suspend_never initial_suspend() const noexcept
     {
@@ -80,20 +82,83 @@ struct final_awaiter_t
     {
     }
 
-    std::coroutine_handle<> await_suspend(std::coroutine_handle<P> coroutine) const noexcept
+    std::coroutine_handle<>
+    await_suspend(std::coroutine_handle<P> coroutine) const noexcept
     {
         // Check if this coroutine is being finalized from the
         // middle of a "continuation" coroutine and hop back there to
         // continue execution while *this* coroutine is suspended.
 
-        auto continuation = coroutine.promise().continuation;
-        if (continuation)
+        if constexpr (P::joinable_v)
         {
-            return continuation;
+            // Joinable tasks are never awaited and so cannot have a
+            // continuation by definition
+            return std::noop_coroutine();
         }
-        return std::noop_coroutine();
+        else
+        {
+            COOP_LOG("Final await for coroutine %p on thread %zu\n",
+                     coroutine.address(),
+                     detail::thread_id());
+            std::scoped_lock lock{coroutine.promise().mutex};
+            if (coroutine.promise().flag)
+            {
+                // We're not the first to reach here
+                auto continuation = coroutine.promise().continuation;
+                if (continuation)
+                {
+                    COOP_LOG("Resuming continuation %p on %p on thread %zu\n",
+                             continuation.address(),
+                             coroutine.address(),
+                             detail::thread_id());
+                    return continuation;
+                }
+                else
+                {
+                    COOP_LOG(
+                        "Coroutine %p on thread %zu missing continuation\n",
+                        coroutine.address(),
+                        detail::thread_id());
+                }
+            }
+            coroutine.promise().flag = true;
+            return std::noop_coroutine();
+        }
     }
 };
+
+namespace detail
+{
+    // Helper function for awaiting on a task. The next resume point is
+    // installed as a continuation of the task being awaited.
+    template <typename P>
+    std::coroutine_handle<>
+    await_suspend(std::coroutine_handle<P> base, std::coroutine_handle<> next)
+    {
+        if constexpr (P::joinable_v)
+        {
+            // Joinable tasks are never awaited and so cannot have a
+            // continuation by definition
+            return std::noop_coroutine();
+        }
+        else
+        {
+            std::scoped_lock lock{base.promise().mutex};
+            if (!base.promise().flag)
+            {
+                // We're the first to reach here
+                base.promise().flag = true;
+                COOP_LOG("Installing continuation %p for %p on thread %zu\n",
+                         next.address(),
+                         base.address(),
+                         detail::thread_id());
+                base.promise().continuation = next;
+                return std::noop_coroutine();
+            }
+            return base;
+        }
+    }
+} // namespace detail
 
 template <bool Joinable>
 class task_base_t
@@ -108,6 +173,8 @@ template <>
 class task_base_t<true>
 {
 public:
+    constexpr static bool joinable_v = true;
+
     void join()
     {
         join_sem_->acquire();
@@ -133,6 +200,8 @@ class task_t final : public task_base_t<Joinable>
 public:
     struct promise_type : public task_base_t<Joinable>::promise_type
     {
+        constexpr static bool joinable_v = Joinable;
+
         T data;
 
         static void* operator new(size_t size)
@@ -190,7 +259,6 @@ public:
     task_t(std::coroutine_handle<promise_type> coroutine) noexcept
         : coroutine_{coroutine}
     {
-        COOP_LOG("task %p born\n", coroutine_.address());
     }
     task_t(task_t const&) = delete;
     task_t& operator=(task_t const&) = delete;
@@ -238,7 +306,6 @@ public:
     {
         if (coroutine_)
         {
-            COOP_LOG("task %p dying\n", coroutine_.address());
             coroutine_.destroy();
         }
     }
@@ -275,10 +342,9 @@ public:
 
     // When suspending from a coroutine *within* a task's coroutine, save the
     // resume point (to be resumed when the inner coroutine finalizes)
-    void
-    await_suspend(std::coroutine_handle<> coroutine) noexcept
+    std::coroutine_handle<> await_suspend(std::coroutine_handle<> coroutine) noexcept
     {
-        coroutine_.promise().continuation = coroutine;
+        return detail::await_suspend(coroutine_, coroutine);
     }
 
 private:
@@ -293,6 +359,8 @@ class task_t<void, Joinable, C> : public task_base_t<Joinable>
 public:
     struct promise_type : public task_base_t<Joinable>::promise_type
     {
+        constexpr static bool joinable_v = Joinable;
+
         static void* operator new(size_t size)
         {
             return C::alloc(size);
@@ -334,7 +402,6 @@ public:
     task_t(std::coroutine_handle<promise_type> coroutine) noexcept
         : coroutine_{coroutine}
     {
-        COOP_LOG("task %p born\n", coroutine_.address());
     }
     task_t(task_t const&) = delete;
     task_t& operator=(task_t const&) = delete;
@@ -382,7 +449,6 @@ public:
     {
         if (coroutine_)
         {
-            COOP_LOG("task %p dying\n", coroutine_.address());
             coroutine_.destroy();
         }
     }
@@ -404,10 +470,9 @@ public:
 
     // When suspending from a coroutine *within* this task's coroutine, save the
     // resume point (to be resumed when the inner coroutine finalizes)
-    void
-    await_suspend(std::coroutine_handle<> coroutine) noexcept
+    std::coroutine_handle<> await_suspend(std::coroutine_handle<> coroutine) noexcept
     {
-        coroutine_.promise().continuation = coroutine;
+        return detail::await_suspend(coroutine_, coroutine);
     }
 
 private:
@@ -451,9 +516,6 @@ inline auto suspend(S& scheduler                             = S::instance(),
             scheduler.schedule(coroutine, cpu_mask, priority, source_location);
         }
     };
-
-    COOP_LOG("Suspending coroutine from thread %zu\n",
-             std::hash<std::thread::id>{}(std::this_thread::get_id()));
 
     return awaiter_t{scheduler, cpu_mask, priority, source_location};
 }
