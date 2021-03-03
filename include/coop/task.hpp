@@ -15,7 +15,6 @@ using experimental::suspend_never;
 #endif
 #include <cstdlib>
 #include <limits>
-#include <mutex>
 
 namespace coop
 {
@@ -55,8 +54,7 @@ struct promise_base_t
     // resume point, which immediately following the suspend point.
     std::coroutine_handle<> continuation = nullptr;
 
-    std::mutex mutex;
-    bool flag = false;
+    std::atomic<bool> flag = false;
 
     // Do not suspend immediately on entry of a coroutine
     std::suspend_never initial_suspend() const noexcept
@@ -100,10 +98,10 @@ struct final_awaiter_t
             COOP_LOG("Final await for coroutine %p on thread %zu\n",
                      coroutine.address(),
                      detail::thread_id());
-            std::scoped_lock lock{coroutine.promise().mutex};
-            if (coroutine.promise().flag)
+            if (coroutine.promise().flag.exchange(true))
             {
-                // We're not the first to reach here
+                // We're not the first to reach here, meaning the continuation
+                // is installed properly (if any)
                 auto continuation = coroutine.promise().continuation;
                 if (continuation)
                 {
@@ -121,7 +119,6 @@ struct final_awaiter_t
                         detail::thread_id());
                 }
             }
-            coroutine.promise().flag = true;
             return std::noop_coroutine();
         }
     }
@@ -143,19 +140,18 @@ namespace detail
         }
         else
         {
-            std::scoped_lock lock{base.promise().mutex};
-            if (!base.promise().flag)
+            COOP_LOG("Installing continuation %p for %p on thread %zu\n",
+                     next.address(),
+                     base.address(),
+                     detail::thread_id());
+            base.promise().continuation = next;
+            if (base.promise().flag.exchange(true))
             {
-                // We're the first to reach here
-                base.promise().flag = true;
-                COOP_LOG("Installing continuation %p for %p on thread %zu\n",
-                         next.address(),
-                         base.address(),
-                         detail::thread_id());
-                base.promise().continuation = next;
-                return std::noop_coroutine();
+                // We're not the first to reach here, meaning the continuation
+                // won't get read
+                return next;
             }
-            return base;
+            return std::noop_coroutine();
         }
     }
 } // namespace detail
