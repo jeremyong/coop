@@ -9,14 +9,34 @@ programming languages. Users *do not* need to understand the C++20 coroutines AP
 - Ships with a default affinity-aware two-priority threadsafe task scheduler.
 - The task scheduler is swappable with your own
 - Supports scheduling of user-defined code and OS completion events (e.g. events that signal after I/O completes)
-- Easy to use, efficient API
+- Easy to use, efficient API, with a small and digestible code footprint (hundreds of lines of code, not thousands)
+
+Tasks in Coop are *eager* as opposed to lazy, meaning that upon suspension, the coroutine is immediately dispatched for execution on
+a worker with the appropriate affinity. While there are many benefits to structuring things lazily (see this excellent [talk](https://www.youtube.com/watch?v=1Wy5sq3s2rg)),
+Coop opts to do things the way it does because:
+
+- Coop was designed to interoperate with existing job/task graph systems
+- Coop was originally written within the context of a game engine, where exceptions were not used
+- For game engines, having a CPU-toplogy-aware dispatch mechanism is extremely important (consider the architecture of, say, the PS5)
+
+While game consoles don't (yet) support C++20 fully, the hope is that options like Coop will be there when the compiler support gets there as well.
 
 ## Limitations
 
+If your use case is too far abreast of Coop's original use case (as above), you may need to do more modification to get Coop to behave the way you want.
+The limitations to consider below are:
+
 - Requires a recent C++20 compiler and code that uses Coop headers must also use C++20
-- The "event_t" wrapper around Win32 events doesn't have equivalent functionality on other platforms yet
+- The "event_t" wrapper around Win32 events doesn't have equivalent functionality on other platforms yet (it's provided as a reference for how you might handle your own overlapped IO)
 - The Clang implementation of the coroutines API at the moment doesn't work with the GCC stdlib++, so use libc++ instead
 - Clang on Windows does not yet support the MSVC coroutines runtime due to ABI differences
+- Coop ignores the problem of unhandled exceptions within scheduled tasks
+
+If the above limitations make Coop unsuitable for you, consider the following libraries:
+
+- [CppCoro](https://github.com/lewissbaker/cppcoro) - A coroutine library for C++
+- [Conduit](https://github.com/loopperfect/conduit) - Lazy High Performance Streams using Coroutine TS
+- [folly::coro](https://github.com/facebook/folly/tree/master/folly/experimental/coro) - a developer-friendly asynchronous C++ framework based on Coroutines TS
 
 ## Building and Running the Tests
 
@@ -270,6 +290,7 @@ The source code of Coop is pretty small all things considered, with the core of 
 lines of commented code. Feel free to take it and adapt it for your use case. This was the route taken as opposed to making every
 design aspect customizable (which would have made the interface far more complicated).
 
-## Notice
+## Additional Resources
 
-This software is alpha quality, but testers and contributors are appreciated.
+To learn more about coroutines in C++20, please do visit this [awesome compendium](https://gist.github.com/MattPD/9b55db49537a90545a90447392ad3aeb)
+of resources compiled by @MattPD.
