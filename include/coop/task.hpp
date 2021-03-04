@@ -171,23 +171,11 @@ class task_base_t<true>
 public:
     constexpr static bool joinable_v = true;
 
-    void join()
-    {
-        join_sem_->acquire();
-    }
-
 protected:
     struct promise_type : public promise_base_t
     {
-        std::binary_semaphore* join_sem = nullptr;
+        std::binary_semaphore join_sem{0};
     };
-
-    void join_init()
-    {
-        join_sem_ = std::make_unique<std::binary_semaphore>(0);
-    }
-
-    std::unique_ptr<std::binary_semaphore> join_sem_;
 };
 
 template <typename T = void, bool Joinable = false, TaskControl C = task_control_t>
@@ -214,13 +202,7 @@ public:
         {
             // On coroutine entry, we store as the continuation a handle
             // corresponding to the next sequence point from the caller.
-            task_t out{std::coroutine_handle<promise_type>::from_promise(*this)};
-            if constexpr (Joinable)
-            {
-                out.join_init();
-                this->join_sem = out.join_sem_.get();
-            }
-            return out;
+            return {std::coroutine_handle<promise_type>::from_promise(*this)};
         }
 
         void
@@ -230,7 +212,7 @@ public:
 
             if constexpr (Joinable)
             {
-                this->join_sem->release();
+                this->join_sem.release();
             }
         }
 
@@ -241,7 +223,7 @@ public:
 
             if constexpr (Joinable)
             {
-                this->join_sem->release();
+                this->join_sem.release();
             }
         }
 
@@ -266,15 +248,6 @@ public:
         }
         coroutine_       = other.coroutine_;
         other.coroutine_ = nullptr;
-
-#ifdef _MSC_VER
-        // On recent MSVC versions, the move constructor of the base template
-        // member field isn't invoked (??)
-        if constexpr (Joinable)
-        {
-            this->join_sem_ = std::move(other.join_sem_);
-        }
-#endif
     }
     task_t& operator=(task_t&& other) noexcept
     {
@@ -286,15 +259,6 @@ public:
             }
             coroutine_       = other.coroutine_;
             other.coroutine_ = nullptr;
-
-#ifdef _MSC_VER
-            // On recent MSVC versions, the move constructor of the base
-            // template member field isn't invoked (??)
-            if constexpr (Joinable)
-            {
-                this->join_sem_ = std::move(other.join_sem_);
-            }
-#endif
         }
         return *this;
     }
@@ -304,6 +268,14 @@ public:
         {
             coroutine_.destroy();
         }
+    }
+
+    void join()
+    {
+        static_assert(Joinable,
+                      "Cannot join a task without the Joinable type parameter "
+                      "set");
+        coroutine_.promise().join_sem.acquire();
     }
 
     // A task_t is truthy if it is not associated with an outstanding coroutine
@@ -371,20 +343,14 @@ public:
         {
             // On coroutine entry, we store as the continuation a handle
             // corresponding to the next sequence point from the caller.
-            task_t out{std::coroutine_handle<promise_type>::from_promise(*this)};
-            if constexpr (Joinable)
-            {
-                out.join_init();
-                this->join_sem = out.join_sem_.get();
-            }
-            return out;
+            return {std::coroutine_handle<promise_type>::from_promise(*this)};
         }
 
-        void return_void() const noexcept
+        void return_void() noexcept
         {
             if constexpr (Joinable)
             {
-                this->join_sem->release();
+                this->join_sem.release();
             }
         }
 
@@ -409,15 +375,6 @@ public:
         }
         coroutine_       = other.coroutine_;
         other.coroutine_ = nullptr;
-
-#ifdef _MSC_VER
-        // On recent MSVC versions, the move constructor of the base
-        // template member field isn't invoked (??)
-        if constexpr (Joinable)
-        {
-            this->join_sem_ = std::move(other.join_sem_);
-        }
-#endif
     }
     task_t& operator=(task_t&& other) noexcept
     {
@@ -429,15 +386,6 @@ public:
             }
             coroutine_       = other.coroutine_;
             other.coroutine_ = nullptr;
-
-#ifdef _MSC_VER
-            // On recent MSVC versions, the move constructor of the base
-            // template member field isn't invoked (??)
-            if constexpr (Joinable)
-            {
-                this->join_sem_ = std::move(other.join_sem_);
-            }
-#endif
         }
         return *this;
     }
@@ -447,6 +395,14 @@ public:
         {
             coroutine_.destroy();
         }
+    }
+
+    void join()
+    {
+        static_assert(Joinable,
+                      "Cannot join a task without the Joinable type parameter "
+                      "set");
+        coroutine_.promise().join_sem.acquire();
     }
 
     // A task_t is truthy if it is not associated with an outstanding coroutine
