@@ -17,7 +17,15 @@ option(COOP_ENABLE_ASAN "Enable ASAN" OFF)
 
 project(coop LANGUAGES CXX)
 
+# Output artifacts to the binary root
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+
 if(COOP_ENABLE_ASAN AND NOT WIN32)
+    # For ASAN usage with MSVC, it's recommended to drive CMake from Visual Studio and use the
+    # addressSantizerEnabled: true
+    # flag in CMakeSettings.json
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
     set(CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
 endif()
@@ -40,6 +48,9 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(coop INTERFACE -fcoroutines)
 endif()
 target_link_libraries(coop INTERFACE Threads::Threads)
+if(BUILD_SHARED_LIBS)
+    target_compile_definitions(coop INTERFACE COOP_BUILD_SHARED)
+endif()
 
 if(COOP_ENABLE_TRACER)
     target_compile_definitions(coop INTERFACE COOP_TRACE)

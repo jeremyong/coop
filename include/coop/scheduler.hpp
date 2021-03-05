@@ -1,5 +1,6 @@
 #pragma once
 
+#include "detail/api.hpp"
 #include "detail/concurrentqueue.h"
 #include "detail/work_queue.hpp"
 #include "event.hpp"
@@ -32,7 +33,7 @@ concept Scheduler = requires(S scheduler,
 };
 
 // Implement the Scheduler concept above to use your own coroutine scheduler
-class scheduler_t final
+class COOP_API scheduler_t final
 {
 public:
     // Returns the default global threadsafe scheduler

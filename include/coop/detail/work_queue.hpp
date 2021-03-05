@@ -1,5 +1,6 @@
 #pragma once
 
+#include "api.hpp"
 #include "concurrentqueue.h"
 #include <atomic>
 #include <coop/source_location.hpp>
@@ -25,7 +26,7 @@ class scheduler_t;
 
 namespace detail
 {
-    class work_queue_t
+    class COOP_API work_queue_t
     {
     public:
         work_queue_t(scheduler_t& scheduler, uint32_t id);

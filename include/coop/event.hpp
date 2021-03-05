@@ -1,5 +1,6 @@
 #pragma once
 
+#include "detail/api.hpp"
 #if defined(__clang__)
 #    include <experimental/coroutine>
 namespace std
@@ -16,7 +17,7 @@ namespace coop
 class scheduler_t;
 
 // Non-owning reference to an event
-class event_ref_t
+class COOP_API event_ref_t
 {
 public:
     enum class status_e
@@ -79,7 +80,7 @@ protected:
 #endif
 };
 
-class event_t final : public event_ref_t
+class COOP_API event_t final : public event_ref_t
 {
 public:
     event_t() = default;

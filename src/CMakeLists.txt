@@ -10,3 +10,7 @@ target_link_libraries(
     PUBLIC
     coop
 )
+
+if(BUILD_SHARED_LIBS)
+    target_compile_definitions(coop_scheduler PRIVATE COOP_IMPL)
+endif()
