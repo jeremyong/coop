@@ -98,7 +98,9 @@ struct final_awaiter_t
             COOP_LOG("Final await for coroutine %p on thread %zu\n",
                      coroutine.address(),
                      detail::thread_id());
-            if (coroutine.promise().flag.exchange(true))
+            // After acquiring the flag, the other thread's write to the
+            // coroutine's continuation must be visible (one-way communication)
+            if (coroutine.promise().flag.exchange(true, std::memory_order_acquire))
             {
                 // We're not the first to reach here, meaning the continuation
                 // is installed properly (if any)
@@ -145,7 +147,9 @@ namespace detail
                      base.address(),
                      detail::thread_id());
             base.promise().continuation = next;
-            if (base.promise().flag.exchange(true))
+            // The write to the continuation must be visible to a person that
+            // acquires the flag
+            if (base.promise().flag.exchange(true, std::memory_order_release))
             {
                 // We're not the first to reach here, meaning the continuation
                 // won't get read
@@ -242,23 +246,13 @@ public:
     task_t& operator=(task_t const&) = delete;
     task_t(task_t&& other) noexcept
     {
-        if (coroutine_)
-        {
-            coroutine_.destroy();
-        }
-        coroutine_       = other.coroutine_;
-        other.coroutine_ = nullptr;
+        std::swap(coroutine_, other.coroutine_);
     }
     task_t& operator=(task_t&& other) noexcept
     {
         if (this != &other)
         {
-            if (coroutine_)
-            {
-                coroutine_.destroy();
-            }
-            coroutine_       = other.coroutine_;
-            other.coroutine_ = nullptr;
+            std::swap(coroutine_, other.coroutine_);
         }
         return *this;
     }
@@ -369,23 +363,13 @@ public:
     task_t& operator=(task_t const&) = delete;
     task_t(task_t&& other) noexcept
     {
-        if (coroutine_)
-        {
-            coroutine_.destroy();
-        }
-        coroutine_       = other.coroutine_;
-        other.coroutine_ = nullptr;
+        std::swap(coroutine_, other.coroutine_);
     }
     task_t& operator=(task_t&& other) noexcept
     {
         if (this != &other)
         {
-            if (coroutine_)
-            {
-                coroutine_.destroy();
-            }
-            coroutine_       = other.coroutine_;
-            other.coroutine_ = nullptr;
+            std::swap(coroutine_, other.coroutine_);
         }
         return *this;
     }
