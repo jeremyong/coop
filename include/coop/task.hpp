@@ -245,14 +245,20 @@ public:
     task_t(task_t const&) = delete;
     task_t& operator=(task_t const&) = delete;
     task_t(task_t&& other) noexcept
+        : coroutine_{other.coroutine_}
     {
-        std::swap(coroutine_, other.coroutine_);
+        other.coroutine_ = nullptr;
     }
     task_t& operator=(task_t&& other) noexcept
     {
         if (this != &other)
         {
-            std::swap(coroutine_, other.coroutine_);
+            if (coroutine_)
+            {
+                coroutine_.destroy();
+            }
+            coroutine_       = other.coroutine_;
+            other.coroutine_ = nullptr;
         }
         return *this;
     }
@@ -362,14 +368,20 @@ public:
     task_t(task_t const&) = delete;
     task_t& operator=(task_t const&) = delete;
     task_t(task_t&& other) noexcept
+        : coroutine_{other.coroutine_}
     {
-        std::swap(coroutine_, other.coroutine_);
+        other.coroutine_ = nullptr;
     }
     task_t& operator=(task_t&& other) noexcept
     {
         if (this != &other)
         {
-            std::swap(coroutine_, other.coroutine_);
+            if (coroutine_)
+            {
+                coroutine_.destroy();
+            }
+            coroutine_       = other.coroutine_;
+            other.coroutine_ = nullptr;
         }
         return *this;
     }
