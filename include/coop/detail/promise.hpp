@@ -10,6 +10,7 @@ namespace std
 {
 using experimental::noop_coroutine;
 using experimental::suspend_never;
+using experimental::coroutine_handle;
 } // namespace std
 #else
 #    include <coroutine>
@@ -197,12 +198,12 @@ namespace detail
     {
         static void* operator new(size_t size)
         {
-            return typename Task::task_control_t::alloc(size);
+            return Task::task_control_t::alloc(size);
         }
 
         static void operator delete(void* ptr)
         {
-            return typename Task::task_control_t::free(ptr);
+            return Task::task_control_t::free(ptr);
         }
 
         Task get_return_object() noexcept

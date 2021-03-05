@@ -14,6 +14,7 @@ namespace std
 {
 using experimental::noop_coroutine;
 using experimental::suspend_never;
+using experimental::coroutine_handle;
 } // namespace std
 #else
 #    include <coroutine>
