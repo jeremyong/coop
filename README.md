@@ -143,13 +143,16 @@ coop::task_t<> big_coroutine()
 
     do_something_useful();
 
-    // Block until t2 is done
+    // Suspend until t2 is done
     co_await t2;
 
     // Right now, t1 and t3 are *potentially* still running
 
     do_something_else();
 
+    // When awaiting a task, this coroutine will not suspend if the task
+    // is already ready. Otherwise, this coroutine suspends to be continued
+    // by the thread that completes the awaited task.
     co_await t1;
     co_await t3;
 
