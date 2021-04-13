@@ -55,9 +55,9 @@ cmake --build .
 
 If you don't intend on using the built in scheduler, simply copy the contents of the `include` folder somewhere in your include path.
 
-Otherwise, the recommended integration is done via cmake. For the header only portion, link against the `coop` target.
+Otherwise, the recommended integration is done via cmake. For the header only portion, link against the `coop::coop_core` target.
 
-If you'd like both headers and the scheduler implementation, link against both `coop` and `coop_scheduler`.
+If you'd like both headers and the scheduler implementation, link against `coop::coop`.
 
 Drop this quick cmake snippet somewhere in your `CMakeLists.txt` file to make both of these targets available.
 
