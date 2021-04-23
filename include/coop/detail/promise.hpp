@@ -8,9 +8,9 @@
 #    include <experimental/coroutine>
 namespace std
 {
+using experimental::coroutine_handle;
 using experimental::noop_coroutine;
 using experimental::suspend_never;
-using experimental::coroutine_handle;
 } // namespace std
 #else
 #    include <coroutine>
@@ -85,6 +85,7 @@ namespace detail
         void await_suspend(std::coroutine_handle<P> coroutine) const noexcept
         {
             coroutine.promise().join_sem.release();
+            coroutine.destroy();
         }
     };
 
@@ -196,16 +197,6 @@ namespace detail
     template <typename Task, bool Joinable>
     struct promise_t<Task, void, Joinable> : public promise_base_t<Joinable>
     {
-        static void* operator new(size_t size)
-        {
-            return Task::task_control_t::alloc(size);
-        }
-
-        static void operator delete(void* ptr)
-        {
-            return Task::task_control_t::free(ptr);
-        }
-
         Task get_return_object() noexcept
         {
             // On coroutine entry, we store as the continuation a handle

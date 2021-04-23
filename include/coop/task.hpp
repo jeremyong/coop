@@ -12,9 +12,9 @@
 #    include <experimental/coroutine>
 namespace std
 {
+using experimental::coroutine_handle;
 using experimental::noop_coroutine;
 using experimental::suspend_never;
-using experimental::coroutine_handle;
 } // namespace std
 #else
 #    include <coroutine>
@@ -22,39 +22,11 @@ using experimental::coroutine_handle;
 
 namespace coop
 {
-struct task_control_t final
-{
-    static void* alloc(size_t size)
-    {
-        return operator new(size);
-    }
-
-    static void free(void* ptr)
-    {
-        operator delete(ptr);
-    }
-};
-
-// Conform to the TaskControl concept below and pass it as the third template
-// parameter to `task_t` to override the allocation behavior
-template <typename T>
-concept TaskControl = requires(T t, size_t size, void* ptr)
-{
-#ifndef __clang__
-    {
-        T::alloc(size)
-    }
-    ->std::same_as<void*>;
-#endif
-    T::free(ptr);
-};
-
-template <typename T = void, bool Joinable = false, TaskControl C = task_control_t>
+template <typename T = void, bool Joinable = false>
 class task_t
 {
 public:
-    using task_control_t = C;
-    using promise_type   = detail::promise_t<task_t, T, Joinable>;
+    using promise_type = detail::promise_t<task_t, T, Joinable>;
 
     task_t() noexcept = default;
     task_t(std::coroutine_handle<promise_type> coroutine) noexcept
@@ -72,9 +44,14 @@ public:
     {
         if (this != &other)
         {
-            if (coroutine_)
+            // For joinable tasks, the coroutine is destroyed in the final
+            // awaiter to support fire-and-forget semantics
+            if constexpr (!Joinable)
             {
-                coroutine_.destroy();
+                if (coroutine_)
+                {
+                    coroutine_.destroy();
+                }
             }
             coroutine_       = other.coroutine_;
             other.coroutine_ = nullptr;
@@ -83,9 +60,12 @@ public:
     }
     ~task_t() noexcept
     {
-        if (coroutine_)
+        if constexpr (!Joinable)
         {
-            coroutine_.destroy();
+            if (coroutine_)
+            {
+                coroutine_.destroy();
+            }
         }
     }
 

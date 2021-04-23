@@ -192,9 +192,6 @@ Note that currently, there is some overhead associated with spawning a joinable 
 The `coop::suspend` function takes additional parameters that can set the CPU affinity mask, priority (only 0 and 1 are supported at the moment,
 with 1 being the higher priority), and file/line information for debugging purposes.
 
-The `task_t` template type also takes an additional type that should implement the `TaskControl` concept. This is currently useful
-if you intend on overriding the allocation and deallocation behavior of the coroutine frames.
-
 In addition to awaiting tasks, you can also await the `event_t` object. While this currently only supports Windows, this lets a coroutine
 suspend execution until an event handle is signaled - a powerful pattern for doing async I/O.
 
@@ -235,39 +232,6 @@ COOP_SUSPEND();
 if you are comfortable with the default behavior. This macro will supply `__FILE__` and `__LINE__` information
 to the `source_location` paramter to get additional tracking. Other macros with numerical suffixes to `COOP_SUSPEND` are
 also provided to allow you to override a subset of parameters as needed.
-
-## (Optional) Override default allocators
-
-By default, coroutine frames are allocated via `operator new` and `operator delete`. Remember that the coroutine frames may not
-always allocate if the compiler can prove the allocation isn't necessary. That said, if you'd like to override the allocator
-with your own (for tracking purposes, or to use a different more specialized allocator), simply provide a `TaskControl` concept
-conforming type as the third template parameter of `task_t`. The full template type signature of a `task_t` is as follows:
-
-```c++
-template <typename T = void, bool Joinable = false, TaskControl C = task_control_t>
-class task_t;
-```
-
-The first template parameter refers to the type that should be `co_return`ed by the coroutine. The `Joinable` parameter indicates
-whether this task should create a `binary_semaphore` which is signaled on completion (and provides the `task_t::join` method to
-wait on the semaphore). The last parameter is any type that has an `alloc` and `free` function. By default, the `TaskControl` type
-is the one below:
-
-
-```c++
-struct task_control_t final
-{
-    static void* alloc(size_t size)
-    {
-        return operator new(size);
-    }
-
-    static void free(void* ptr)
-    {
-        operator delete(ptr);
-    }
-};
-```
 
 ## (Optional) Use your own scheduler
 
